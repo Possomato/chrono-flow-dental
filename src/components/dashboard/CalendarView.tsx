@@ -1,5 +1,4 @@
-import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar as CalendarIcon, Plus } from "lucide-react";
@@ -11,41 +10,45 @@ type Appointment = {
   id: number;
   date: string;
   status: string;
-  patient_id: number;
-  procedure_id: number;
-  patients: { name: string };
-  procedures: { name: string };
+  patients: { name: string } | null;
+  procedures: { name: string } | null;
 };
 
-export function CalendarView() {
-  const [currentDate, setCurrentDate] = useState(new Date());
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
+const getStatusColor = (status: string) => {
+    switch (status.toLowerCase()) {
+      case "scheduled":
+        return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+      case "confirmed":
+        return "bg-green-500/10 text-green-500 border-green-500/20";
+      case "completed":
+        return "bg-gray-500/10 text-gray-500 border-gray-500/20";
+      case "cancelled":
+        return "bg-red-500/10 text-red-500 border-red-500/20";
+      default:
+        return "bg-muted text-muted-foreground";
+    }
+};
 
-  useEffect(() => {
-    loadAppointments();
-  }, [currentDate]);
+export async function CalendarView() {
+  const supabase = createClient();
+  const currentDate = new Date();
+  const start = startOfMonth(currentDate);
+  const end = endOfMonth(currentDate);
 
-  const loadAppointments = async () => {
-    const start = startOfMonth(currentDate);
-    const end = endOfMonth(currentDate);
+  const { data: appointmentsData } = await supabase
+    .from("appointments")
+    .select(`
+      id,
+      date,
+      status,
+      patients ( name ),
+      procedures ( name )
+    `)
+    .gte("date", start.toISOString())
+    .lte("date", end.toISOString())
+    .order("date");
 
-    const { data } = await supabase
-      .from("appointments")
-      .select(`
-        id,
-        date,
-        status,
-        patient_id,
-        procedure_id,
-        patients (name),
-        procedures (name)
-      `)
-      .gte("date", start.toISOString())
-      .lte("date", end.toISOString())
-      .order("date");
-
-    if (data) setAppointments(data as Appointment[]);
-  };
+  const appointments: Appointment[] = appointmentsData || [];
 
   const monthStart = startOfMonth(currentDate);
   const monthEnd = endOfMonth(currentDate);
@@ -55,21 +58,6 @@ export function CalendarView() {
 
   const getAppointmentsForDay = (day: Date) => {
     return appointments.filter((apt) => isSameDay(new Date(apt.date), day));
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case "agendada":
-        return "bg-primary/10 text-primary border-primary/20";
-      case "confirmada":
-        return "bg-secondary/10 text-secondary border-secondary/20";
-      case "realizada":
-        return "bg-success/10 text-success border-success/20";
-      case "cancelada":
-        return "bg-destructive/10 text-destructive border-destructive/20";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
   };
 
   return (
@@ -95,29 +83,7 @@ export function CalendarView() {
               </CardTitle>
               <CardDescription>Suas consultas do mês</CardDescription>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1))}
-              >
-                Anterior
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentDate(new Date())}
-              >
-                Hoje
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1))}
-              >
-                Próximo
-              </Button>
-            </div>
+            {/* Month navigation can be added here later */}
           </div>
         </CardHeader>
         <CardContent>
@@ -137,7 +103,7 @@ export function CalendarView() {
                   key={idx}
                   className={cn(
                     "min-h-24 border rounded-lg p-2 transition-colors",
-                    !isCurrentMonth && "bg-muted/50 text-muted-foreground",
+                    !isCurrentMonth && "bg-muted/50 text-muted-foreground/50",
                     isToday && "border-primary border-2",
                     isCurrentMonth && "hover:bg-accent"
                   )}
@@ -154,7 +120,7 @@ export function CalendarView() {
                           getStatusColor(apt.status)
                         )}
                       >
-                        {format(new Date(apt.date), "HH:mm")} - {apt.patients.name}
+                        {format(new Date(apt.date), "HH:mm")} - {apt.patients?.name}
                       </div>
                     ))}
                     {dayAppointments.length > 2 && (
@@ -176,8 +142,8 @@ export function CalendarView() {
             <CardDescription>Agendadas</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-primary">
-              {appointments.filter((a) => a.status === "agendada").length}
+            <div className="text-2xl font-bold text-blue-500">
+              {appointments.filter((a) => a.status === "Scheduled").length}
             </div>
           </CardContent>
         </Card>
@@ -186,8 +152,8 @@ export function CalendarView() {
             <CardDescription>Confirmadas</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-secondary">
-              {appointments.filter((a) => a.status === "confirmada").length}
+            <div className="text-2xl font-bold text-green-500">
+              {appointments.filter((a) => a.status === "Confirmed").length}
             </div>
           </CardContent>
         </Card>
@@ -196,8 +162,8 @@ export function CalendarView() {
             <CardDescription>Realizadas</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-success">
-              {appointments.filter((a) => a.status === "realizada").length}
+            <div className="text-2xl font-bold text-gray-500">
+              {appointments.filter((a) => a.status === "Completed").length}
             </div>
           </CardContent>
         </Card>
@@ -206,8 +172,8 @@ export function CalendarView() {
             <CardDescription>Canceladas</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-destructive">
-              {appointments.filter((a) => a.status === "cancelada").length}
+            <div className="text-2xl font-bold text-red-500">
+              {appointments.filter((a) => a.status === "Cancelled").length}
             </div>
           </CardContent>
         </Card>
